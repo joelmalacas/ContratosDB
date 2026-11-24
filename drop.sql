@@ -1,4 +1,6 @@
-/*Drop Table*/
+/* =====================================================================
+   TP1 - CBD - Complementos de Bases de Dados, LIMPEZA (DELETE)
+   ===================================================================== */
    
 DROP TABLE IF EXISTS CONTRATO_ENTIDADE;
 DROP TABLE IF EXISTS CONTRATO_CPV;
@@ -13,3 +15,27 @@ DROP TABLE IF EXISTS TIPO_CONTRATO;
 DROP TABLE IF EXISTS LOCAL_EXECUCAO;
 DROP TABLE IF EXISTS PAIS;
 DROP TABLE IF EXISTS NUTS;
+
+-- 1. Tabelas associativas / dependentes de CONTRATO
+DELETE FROM CONTRATO_ENTIDADE;
+DELETE FROM CONTRATO_CPV;
+DELETE FROM CONTRATO_LOCAL_EXECUCAO;
+DELETE FROM CONTRATO_TIPO_CONTRATO;
+
+-- 2. Tabelas principais com chaves estrangeiras
+DELETE FROM CONTRATO;
+DELETE FROM PROCEDIMENTO;
+DELETE FROM ENTIDADE;
+
+-- 3. Tabelas de domínio / lookup
+DELETE FROM TIPO_PROCEDIMENTO;
+DELETE FROM CPV;
+DELETE FROM TIPO_CONTRATO;
+DELETE FROM LOCAL_EXECUCAO;
+DELETE FROM NUTS;
+DELETE FROM PAIS;
+
+-- Opcional: limpar também a tabela de resultados do exercício
+DELETE FROM RESULTADO_LOCALIZACAO;
+
+COMMIT;
