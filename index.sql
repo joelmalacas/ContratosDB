@@ -455,3 +455,173 @@ ORDER BY id_alteracao;
 -- LIMPEZA FINAL (opcional)
 -- =========================================================================
 DELETE FROM REGISTA_ALTERACOES_PRECOS WHERE id_contrato = 99902;
+
+
+/*==========================================*/
+--3. a)
+create table ALERTA_CONTRATO (
+    id_contrato     number,
+    preco_anterior  number(12, 2),
+    preco_novo      number(12, 2),
+    mensagem        varchar2(200),
+    data_registo    date
+);
+
+
+create or replace function Total_Contratos_Entidade_Papel(
+  p_id_entidade in Entidade.id_entidade%type,
+  p_papel in Contrato_Entidade.papel%type
+) return number
+is
+  v_total number := 0;
+begin
+  select count(*)
+  into v_total
+  from Contrato_Entidade
+  where id_entidade = p_id_entidade and lower(papel) = lower(p_papel);
+
+  return v_total;
+
+  exception
+    when no_data_found then
+      return 0;
+    when others then
+      return -1;
+end Total_Contratos_Entidade_Papel;
+
+--3. b)
+
+create or replace trigger Verifica_Preco_Contrato
+after update of preco_contratual on Contrato
+for each row
+declare
+  v_msg ALERTA_CONTRATO.mensagem%type;
+begin
+  if :new.preco_contratual < :old.preco_contratual then
+    v_msg := 'Redução de preço contratual';
+    dbms_output.put_line('Contrato ' || :old.preco_contratual || ': ' || v_msg);
+
+    insert into ALERTA_CONTRATO (
+      id_contrato,
+      preco_anterior,
+      preco_novo,
+      mensagem,
+      data_registo
+    ) values (
+      :old.id_contrato,
+      :old.preco_contratual,
+      :new.preco_contratual,
+      v_msg,
+      sysdate
+    );
+  
+  elsif :new.preco_contratual > :old.preco_contratual * 2 then
+    v_msg := 'Aumento superior ao dobro do preço anterior';
+    dbms_output.put_line('Contrato ' || :old.id_contrato || ': ' || v_msg);
+
+    insert into ALERTA_CONTRATO (
+      id_contrato,
+      preco_anterior,
+      preco_novo,
+      mensagem,
+      data_registo
+    ) values (
+      :old.id_contrato,
+      :old.preco_contratual,
+      :new.preco_contratual,
+      v_msg,
+      sysdate
+    );
+  end if;
+
+  exception
+    when others then
+      dbms_output.put_line('Erro no trigger: ' || sqlerrm);
+end Verifica_Preco_Contrato;
+
+
+--3. a) --> TESTES
+SET SERVEROUTPUT ON;
+
+-- 1. Descobrir um id_entidade válido que exista na tabela Contrato_Entidade
+SELECT id_entidade, papel, COUNT(*) AS total
+FROM Contrato_Entidade
+GROUP BY id_entidade, papel
+FETCH FIRST 5 ROWS ONLY;
+
+-- 2. Testar a função numa consulta SQL
+SELECT
+    id_entidade,
+    designacao,
+    Total_Contratos_Entidade_Papel(id_entidade, 'Adjudicante')   AS total_adjudicante,
+    Total_Contratos_Entidade_Papel(id_entidade, 'Adjudicatario') AS total_adjudicatario
+FROM Entidade
+WHERE id_entidade = 1;
+
+-- 3. Testar a função com diferenças entre maiúsculas e minúsculas (ex.: 'adjudicante')
+SELECT Total_Contratos_Entidade_Papel(1, 'adjudicante') AS teste_minusculas
+FROM DUAL;
+
+-- 4. Testar dentro de um bloco PL/SQL anónimo (incluindo uma entidade inexistente)
+DECLARE
+    v_total_adj  NUMBER;
+    v_total_inex NUMBER;
+BEGIN
+    v_total_adj := Total_Contratos_Entidade_Papel(1, 'Adjudicante');
+    DBMS_OUTPUT.PUT_LINE('Total como Adjudicante: ' || v_total_adj);
+
+    v_total_inex := Total_Contratos_Entidade_Papel(-99999, 'Adjudicante');
+    DBMS_OUTPUT.PUT_LINE('Total para entidade inexistente: ' || v_total_inex);
+END;
+
+
+--3. b) --> TESTES
+
+-- 1. Descobrir um id_procedimento válido para poder inserir um contrato de teste
+SELECT id_procedimento
+FROM Procedimento
+FETCH FIRST 1 ROW ONLY;
+
+-- 2. Preparação: limpar dados de teste anteriores e inserir contrato com preço 1000.00
+DELETE FROM ALERTA_CONTRATO WHERE id_contrato = 99903;
+DELETE FROM Contrato WHERE id_contrato = 99903;
+
+INSERT INTO Contrato (id_contrato, id_procedimento, objeto, preco_contratual)
+VALUES (99903, 201, 'Contrato teste trigger 3b', 1000.00);
+
+-- Confirmar que não existem alertas iniciais (0 linhas)
+SELECT * FROM ALERTA_CONTRATO WHERE id_contrato = 99903;
+
+-- 3. TESTE 1: Aumento moderado (de 1000.00 para 1500.00 — não ultrapassa o dobro)
+--    RE: não dispara alerta (0 linhas em ALERTA_CONTRATO)
+UPDATE Contrato
+SET preco_contratual = 1500.00
+WHERE id_contrato = 99903;
+
+SELECT * FROM ALERTA_CONTRATO WHERE id_contrato = 99903;
+
+-- 4. TESTE 2: Aumento superior ao dobro (de 1500.00 para 3500.00)
+--    RE: 1 registo em ALERTA_CONTRATO com 'Aumento superior ao dobro do preco anterior'
+UPDATE Contrato
+SET preco_contratual = 3500.00
+WHERE id_contrato = 99903;
+
+SELECT id_contrato, preco_anterior, preco_novo, mensagem, data_registo
+FROM ALERTA_CONTRATO
+WHERE id_contrato = 99903;
+
+-- 5. TESTE 3: Redução do preço contratual (de 3500.00 para 2000.00)
+--    RE: 2.º registo em ALERTA_CONTRATO com 'Reducao de preco contratual'
+UPDATE Contrato
+SET preco_contratual = 2000.00
+WHERE id_contrato = 99903;
+
+SELECT id_contrato, preco_anterior, preco_novo, mensagem, data_registo
+FROM ALERTA_CONTRATO
+WHERE id_contrato = 99903;
+
+-- 6. Limpeza final dos registos de teste
+DELETE FROM ALERTA_CONTRATO WHERE id_contrato = 99903;
+DELETE FROM Contrato WHERE id_contrato = 99903;
+
+rollback;
